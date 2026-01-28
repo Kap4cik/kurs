@@ -1,149 +1,96 @@
-import requests
-import json
-from pydantic import BaseModel
 from typing import Union
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+import json
+import time
+from os import listdir
+from os.path import isfile, join
+import os
+import random
 
-class Item(BaseModel): 
+app = FastAPI()
+ 
+
+class Item(BaseModel):
     name: str
     description: Union[str, None] = "Описание товара"
     price: float
     id: Union[int, None] = -1
-    
-    def __str__(self):
-        return f"Товар: {self.name}, стоимость: {self.price} рублей"
     
     
 class User(BaseModel):
     login:str
     email: str
     password: str
+    role: Union[str, None] = "basic role"
+    token: Union[str, None] = None
+    id: Union[int, None] = -1
 
 
 class AuthUser(BaseModel):
     login: str
-    password: str   
+    password: str
 
 
-def send_get(url):
-    headers = {'Authorization': 'xxx'}
-    response = requests.get(url, headers = headers)
-    return response.text, response.status_code
-
-
-def all_items():
-    result, code = send_get("http://localhost:8000/items/print")
-    match code:
-        case 200:
-            json_items = json.loads(result)
-            for json_item in json_items:
-                item = Item(**json_item)
-                print(item)
-                
-        case 401:
-            print("Неверные авторизацинные данные!")
-
-        case 403:
-            print("Доступ ограничен!")
-        
-        case _:
-            print("Неизвестная ошибка!")
-
-
-def create_item():
-    print("\nДОБАВЛЕНИЕ ТОВАРА")
-    name = input("Название товара: ")
-    price = float(input("Цена товара: "))
+@app.post("/items/create")
+def create_item(item: Item):
+    item.id = int(time.time())
     
-    item_data = Item(name=name, price=price)
+    with open(f"items/item_{item.id}.json", 'w') as f:
+        json.dump(item.model_dump(), f)
+        return item
     
-    response = requests.post("http://localhost:8000/items/create", json=item_data.model_dump())
-    
-    if response.status_code == 200:
-        created_item = Item(**response.json())
-        print(created_item)
-    else:
-        print("Ошибка добавления товара")
+@app.get("/items/print")
+def all_items(request: Request):
+    token = request.headers.get('Authorization')
+    print(token)
+    if token != 'xxx':
+        raise HTTPException(status_code=401, detail="Invalid token")
+    json_files_names = [file for file in os.listdir('items/') if file.endswith('.json')]
+    data = []
+    for json_file_name in json_files_names:
+        file_path = os.path.join('items/', json_file_name)
+        with open(file_path, 'r') as f:
+            data.append(json.load(f))
+    return data
 
-
-def reg():
-    print("\nРЕГИСТРАЦИЯ")
-    login = input("Логин: ")
-    email = input("Email: ")
-    password = input("Пароль: ")
+@app.post("/users/reg")
+def create_user(user: User):
     
-    user_data = User(login=login, email=email, password=password)
+    if len(user.login) < 8:
+        raise HTTPException(status_code=400, detail="Слишком короткий логин")
     
-    response = requests.post("http://localhost:8000/users/reg", json=user_data.model_dump())
+    if len(user.password) < 8:
+        raise HTTPException(status_code=400, detail="Слишком короткий пароль")
     
-    if response.status_code == 200:
-        user = response.json()
-        print(f"\nПользователь {user['login']} успешно зарегестрирован")
-        return True
-    else:
-        error = response.json().get('detail', 'Ошибка')
-        print(f"Произошла ошибка: {error}")
-        return False
-
-
-def auth():
-    print("\nАВТОРИЗАЦИЯ")
-    login = input("Логин: ")
-    password = input("Пароль: ")
-    
-    user_data = AuthUser(login=login, password=password)
-    
-    response = requests.post("http://localhost:8000/users/auth", json=user_data.model_dump())
-    
-    if response.status_code == 200:
-        user = response.json()
-        print(f"\nАвторизация прошла успешно")
-        print(f"Логин: {user['login']}")
-        print(f"Токен: {user['token']}")
-        return True
-    else:
-        error = response.json().get('detail', 'Ошибка')
-        print(f"Произошла ошибка: {error}")
-        return False
-        
-               
-def main_menu():
-    
-    while True:
-        try:
-            print("\nВведите команду:")
-            command = int(input("1 - Список товаров\n2 - Добавить товар\n3 - Выйти из профиля\n"))
+    if "@" not in user.email:
+        raise HTTPException(status_code=400, detail="Некорректный email")
+       
+    #существует ли пользователь
+    for file in os.listdir("users"):
+        with open(f"users/{file}", 'r') as f:
+            data = json.load(f)
+            if data['login'] == user.login:
+                raise HTTPException(status_code=400, detail="Логин уже занят")
+            if data['email'] == user.email:
+                raise HTTPException(status_code=400, detail="Email уже занят")
             
-            match command:
-                case 1:
-                    all_items()
-                case 2:
-                    create_item()
-                case 3:
-                    break
-                case _:
-                    print("Нет такого выбора")
-                    
-        except ValueError:
-            print("Некорректный ввод!")
+    user.id = int(time.time())
+    user.token = str(random.getrandbits(128))
+    
+    with open(f"users/user_{user.id}.json", 'w') as f:
+        json.dump(user.model_dump(), f)
+        return user
+    
+@app.post("/users/auth")
+def auth_user(params: AuthUser):
+    json_files_names = [file for file in os.listdir('users/') if file.endswith('.json')]
+    for json_file_name in json_files_names:
+        file_path = os.path.join('users/', json_file_name)
+        with open(file_path, 'r') as f:
+            json_item = json.load(f)
+            user = User(**json_item)
+            if user.login == params.login and user.password == params.password:
+                return {"login": user.login, "token": user.token}
             
-            
-while True:
-    try:
-        print("\nВведите команду:")
-        command = int(input("1 - Регистрация\n2 - Авторизация\n3 - Выйти из программы\n"))
-        
-        match command:
-            case 1:
-                if reg():
-                    main_menu()
-            case 2:
-                if auth():
-                    main_menu()
-            case 3:
-                print("Конец")
-                break
-            case _:
-                print("Нет такого выбора")
-                
-    except ValueError:
-        print("Некорректный ввод!")
+    raise HTTPException(status_code=401, detail="Неверный логин или пароль")
