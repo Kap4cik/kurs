@@ -35,7 +35,7 @@ class PasswordChange(BaseModel):
     old_password: str
     new_password: str
 
-def resheto_sundarma(limit: int) -> List[int]:
+def resheto_sundarama(limit: int) -> List[int]:
 
     if limit < 2:
         return []
@@ -165,7 +165,7 @@ def generate_sundaram_primes(request: SundaramGenerateRequest, request_obj: Requ
     if request.limit < 1:
         raise HTTPException(status_code=400, detail="Верхняя граница должна быть положительным числом")
     
-    primes = resheto_sundarma(request.limit)
+    primes = resheto_sundarama(request.limit)
     
     user.current_primes = primes
     user.sundaram_params = {
